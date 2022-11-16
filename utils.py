@@ -1,3 +1,4 @@
+import os
 import random
 
 import dgl
@@ -5,8 +6,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import matplotlib.pyplot as plt
 from dgllife.model import GCNPredictor
 from dgllife.utils import ScaffoldSplitter, RandomSplitter
+from sklearn.metrics import roc_curve, auc
 
 
 def set_seed(args):
@@ -34,6 +37,7 @@ def set_model_config(args):
             "weight_decay": 0.001
         }
     return config
+
 
 def config_update(args, model_config):
     # if args['learning_rate']:
@@ -136,3 +140,51 @@ def predict(args, model, bg):
         return model(bg, node_feats)
     else:
         pass
+
+
+def plot_train_method(args, loss_list, val_list):
+    plt.figure(figsize=(12, 4))
+    if args['metric'] in ['roc_auc_score', 'pr_auc_score', 'r2']:
+        val_best = max(val_list)
+    else:
+        val_best = min(val_list)
+    plt.subplot(121)
+    plt.plot(loss_list, label=f'Best loss = {min(loss_list):.4f}')
+    plt.legend(loc='upper right')
+    plt.xlabel('Iterations')
+    plt.subplot(122)
+    plt.plot(val_list, label=f'Best val_score = {val_best:.4f}')
+    plt.plot([val_best for i in val_list], linestyle='--')
+    plt.legend(loc='upper right')
+    plt.xlabel('Iterations')
+    plt.legend(loc='upper right')
+    plt.xlabel('Iterations')
+    plt.subplots_adjust(wspace=0.3, hspace=0)
+    plt.suptitle('Train Loss, Validation Score And Test Score in Training Period in ' + args['dataset'])
+    plt.savefig(os.path.join(args['result_path'], 'train_val.png'))
+    plt.clf()
+    return
+
+def plot_result(args, label, predict, score):
+    if args['mode'] == 'classification':
+        fpr, tpr, threshold = roc_curve(label, predict)
+        roc_auc = auc(fpr, tpr)
+        plt.figure()
+        lw = 2
+        plt.figure(figsize=(10, 10))
+        plt.plot(fpr, tpr, color='darkorange',
+                 lw=lw, label='ROC curve (area = %0.4f)' % score)
+        plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.05])
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('Receiver operating characteristic example')
+        plt.legend(loc='lower right')
+    else:
+        plt.plot([min(label), max(label)], [min(label), max(label)])
+        plt.scatter(predict, label, label='{} {:.4f}'.format(args['metric'], score))
+        plt.legend(loc='lower right')
+    plt.savefig(os.path.join(args['result_path'], 'result.png'))
+    plt.clf()
+    return

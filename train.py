@@ -2,13 +2,15 @@ import os
 import time
 
 import numpy as np
+import pandas as pd
 import torch
 from dgllife.utils import CanonicalAtomFeaturizer, Meter
 from torch import nn
 from torch.optim import Adam
 
 from dataset import load_data_from_dgl, load_data
-from utils import split_datset, set_model_config, config_update, load_model, criterion, predict
+from utils import split_datset, set_model_config, config_update, load_model, criterion, predict, plot_train_method, \
+    plot_result
 
 
 def eval_iteration(args, model, val_loader):
@@ -92,7 +94,7 @@ def train(args):
     args = config_update(args, model_config)
     dataset = load_data_from_dgl(args)
     train_set, val_set, test_set = split_datset(args, dataset)
-    args['total'] = int(args['num_epochs'] * len(train_set) / args['batch_size'])
+    args['t_total'] = int(args['num_epochs'] * len(train_set) / args['batch_size'])
     print('Total Iterations: ', args['t_total'])
     train_loader, val_loader, test_loader = load_data(args, train_set,
                                                       val_set, test_set)
@@ -110,3 +112,25 @@ def train(args):
     best_model, best_score, loss_list, val_list = train_iteration(args, model, train_loader, val_loader, loss_criterion,
                                                                   optimizer)
     plot_train_method(args, loss_list, val_list)
+    test_score, test_result = eval_iteration(args, best_model, test_loader)
+    print('-' * 20 + 'Test Result' + '-' * 20)
+    print(f'val {args["metric"]} {best_score:.4f}')
+    print(f'test {args["metric"]} {test_score:.4f}')
+    torch.save(best_model, os.path.join(args['result_path'], 'models.pth'))
+    test_result = np.array(test_result).reshape(len(test_set.indices), args['n_tasks'])
+    label = dataset.labels.numpy().squeeze()[test_set.indices].reshape(len(test_set.indices), args['n_tasks'])
+    smiles = np.array(dataset.smiles)[test_set.indices].reshape(len(test_set.indices), 1)
+    data = np.hstack((smiles, label, test_result))
+    df = pd.DataFrame(data, columns=['SMILES'] +
+                                    (['Label_' + str(i) for i in range(args['n_tasks'])] if args['n_tasks'] != 1 else [
+                                        'Label']) +
+                                    (['PREDICT_' + str(i) for i in range(args['n_tasks'])] if args['n_tasks'] != 1 else
+                                     ['PREDICT']))
+    df.to_csv(os.path.join(args['result_path'], 'result.csv'), index=False)
+    if args['n_tasks'] == 1:
+        plot_result(args, label, test_result, test_score)
+    df = pd.DataFrame(np.array([loss_list, val_list]).T, columns=['Train Loss', 'Validation Score'])
+    df.to_csv(os.path.join(args['result_path'], 'loss.csv'), index=False)
+    with open(os.path.join(args['result_path'], f'{test_score:.4f}' + '.txt'), 'w') as file:
+        file.write(str(test_score))
+    return

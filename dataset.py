@@ -1,6 +1,6 @@
 from functools import partial
 
-from dgllife.data import Tox21
+from dgllife.data import Tox21, ESOL
 from dgllife.utils import smiles_to_bigraph
 from torch.utils.data import DataLoader
 
@@ -13,6 +13,14 @@ def load_data_from_dgl(args):
                         node_featurizer=args['node_featurizer'],
                         edge_featurizer=args['edge_featurizer'])
         args['mode'] = 'classification'
+    elif args['dataset'] == 'ESOL':
+        dataset = ESOL(smiles_to_graph=partial(smiles_to_bigraph, add_self_loop=True),
+                       node_featurizer=args['node_featurizer'],
+                       edge_featurizer=args['edge_featurizer'],
+                       n_jobs=1 if args['num_workers'] == 0 else args['num_workers'])
+        args['mode'] = 'regression'
+    else:
+        raise ValueError(f'Unexpected dataset: {args["dataset"]}')
     args['n_tasks'] = dataset.n_tasks
 
     return dataset
