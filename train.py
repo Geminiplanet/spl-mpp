@@ -10,7 +10,7 @@ from torch.optim import Adam
 
 from dataset import load_data_from_dgl, load_data
 from utils import split_datset, set_model_config, config_update, load_model, criterion, predict, plot_train_method, \
-    plot_result
+    plot_result, SPLLoss
 
 
 def eval_iteration(args, model, val_loader):
@@ -134,3 +134,69 @@ def train(args):
     with open(os.path.join(args['result_path'], f'{test_score:.4f}' + '.txt'), 'w') as file:
         file.write(str(test_score))
     return
+
+
+def train_spl(args):
+    args['device'] = torch.device('cpu')
+    args['result_path'] = os.path.join(os.getcwd(), args['result_path'])
+    try:
+        os.mkdir(args['result_path'])
+    except:
+        pass
+    if args['featurizer_type'] == 'canonical':
+        args['node_featurizer'] = CanonicalAtomFeaturizer()
+        args['edge_featurizer'] = None
+    if args['featurizer_type'] != 'pre_train':
+        args['in_node_feats'] = args['node_featurizer'].feat_size()
+    model_config = set_model_config(args)
+    args = config_update(args, model_config)
+    dataset = load_data_from_dgl(args)
+    train_set, val_set, test_set = split_datset(args, dataset)
+    args['t_total'] = int(args['num_epochs'] * len(train_set) / args['batch_size'])
+    print('Total Iterations: ', args['t_total'])
+    train_loader, val_loader, test_loadre = load_data(args, train_set, val_set, test_set)
+    model = load_model(args)
+    model.to(args['device'])
+    print('Task Type: ', args['mode'])
+    criterion = SPLLoss(n_samples=len(train_set))
+    optimizer = Adam(model.parameters(), lr=args['lr'], weight_decay=args['weight_decay'])
+
+    model.train()
+    best_model = model
+    best_score = 0 if args['metric'] in ['roc_auc_score', 'pr_auc_score', 'r2'] else 999
+    iter_count = 0
+    loss_list, val_list = [], []
+    time_list = []
+    time_list.append(time.time())
+    while iter_count < args['t_total']:
+        for batch_id, batch_data in enumerate(train_loader):
+            smiles, bg, labels, masks = batch_data
+            labels, masks = labels.to(args['device']), masks.to(args['device'])
+            prediction = predict(args, model, bg)
+            # Mask non-existing labels
+            loss = (criterion(prediction, labels) * (masks != 0).float()).mean()
+            print(f'iter_count: {iter_count}, loss: {loss}')
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            val_score, _ = eval_iteration(args, model, val_loader)
+
+            if iter_count % args['print_every'] == 0:
+                print(f'iteration {iter_count}/{args["t_total"]}, loss {loss:.4f}, val_score {val_score:.4f}')
+            if args['metric'] in ['roc_auc_score', 'pr_auc_score', 'r2']:
+                if val_score > best_score:
+                    best_model = model
+                    best_score = val_score
+            else:
+                if val_score < best_score:
+                    best_model = model
+                    best_score = val_score
+            iter_count += 1
+            time_list.append(time.time())
+            model.train()
+            loss_list.append(loss.cpu().detach().numpy())
+            val_list.append(val_score)
+            if iter_count == args['t_total']:
+                break
+
+

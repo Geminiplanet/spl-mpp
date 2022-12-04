@@ -10,6 +10,28 @@ import matplotlib.pyplot as plt
 from dgllife.model import GCNPredictor
 from dgllife.utils import ScaffoldSplitter, RandomSplitter
 from sklearn.metrics import roc_curve, auc
+from torch import Tensor
+
+
+class SPLLoss(nn.NLLLoss):
+    def __init__(self, *args, n_samples=0, **kwargs):
+        super(SPLLoss, self).__init__(*args, **kwargs)
+        self.threshold = 0.1
+        self.growing_factor = 1.3
+        self.v = torch.zeros(n_samples).int()
+
+    def forward(self, input: Tensor, target: Tensor, index: Tensor) -> Tensor:
+        super_loss = nn.functional.nll_loss(input, target, reduction="none")
+        v = self.spl_loss(super_loss)
+        self.v[index] = v
+        return (super_loss * v).mean()
+
+    def increase_threshold(self):
+        self.threshold *= self.growing_factor
+
+    def spl_loss(self, super_loss):
+        v = super_loss < self.threshold
+        return v.int()
 
 
 def set_seed(args):
@@ -164,6 +186,7 @@ def plot_train_method(args, loss_list, val_list):
     plt.savefig(os.path.join(args['result_path'], 'train_val.png'))
     plt.clf()
     return
+
 
 def plot_result(args, label, predict, score):
     if args['mode'] == 'classification':
